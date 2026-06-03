@@ -69,6 +69,7 @@ type Site = {
 };
 
 type EditTool = "point" | "box-delete" | "box-redetect";
+type ParamScope = "global" | "roi";
 
 type Params = {
   mode: "bright" | "dark";
@@ -101,6 +102,7 @@ const defaultParams: Params = {
   fill_strength: 0.35,
   fill_iterations: 1
 };
+const savedParamsKey = "atom-locator-saved-params-v1";
 
 type SliderParam = {
   key: keyof Pick<
@@ -142,6 +144,8 @@ function App() {
   const [images, setImages] = useState<ImageInfo[]>([]);
   const [selectedImage, setSelectedImage] = useState<string>("");
   const [params, setParams] = useState<Params>(defaultParams);
+  const [roiParams, setRoiParams] = useState<Params>({ ...defaultParams, fill_lattice: false, fill_strength: 0.15 });
+  const [paramScope, setParamScope] = useState<ParamScope>("global");
   const [run, setRun] = useState<RunSummary | null>(null);
   const [selectedResult, setSelectedResult] = useState<RunResult | null>(null);
   const [editableSites, setEditableSites] = useState<Site[]>([]);
@@ -153,6 +157,7 @@ function App() {
   const [imagesLoading, setImagesLoading] = useState(true);
   const [error, setError] = useState("");
   const [editMessage, setEditMessage] = useState("");
+  const [paramMessage, setParamMessage] = useState("");
   const [roi, setRoi] = useState<Roi | null>(null);
   const [roiBox, setRoiBox] = useState<RoiBox | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -172,6 +177,8 @@ function App() {
     : selectedImage
       ? `/api/images/${encodeURIComponent(selectedImage)}/preview`
       : "";
+  const activeParams = paramScope === "global" ? params : roiParams;
+  const setActiveParams = paramScope === "global" ? setParams : setRoiParams;
 
   useEffect(() => {
     setRoi(null);
@@ -277,6 +284,7 @@ function App() {
       const summary = (await response.json()) as RunSummary;
       if (summary.autotune?.best_parameters) {
         setParams(normalizeParams(summary.autotune.best_parameters));
+        setRoiParams(normalizeParams({ ...summary.autotune.best_parameters, fill_lattice: false, fill_strength: 0.15 }));
       }
       setRun(summary);
       setSelectedResult(summary.results[0] ?? null);
@@ -289,7 +297,35 @@ function App() {
 
   function updateSlider(key: SliderParam["key"], value: string) {
     const nextValue = Number(value);
-    setParams((current) => normalizeParams({ ...current, [key]: nextValue }));
+    setActiveParams((current) => normalizeParams({ ...current, [key]: nextValue }));
+  }
+
+  function copyGlobalToRoi() {
+    setRoiParams(params);
+    setParamScope("roi");
+    setParamMessage("已复制全图参数到 ROI 局部参数。");
+  }
+
+  function saveParamPreset() {
+    const payload = { global: params, roi: roiParams };
+    localStorage.setItem(savedParamsKey, JSON.stringify(payload));
+    setParamMessage("已保存两套参数到本机浏览器。");
+  }
+
+  function loadParamPreset() {
+    const raw = localStorage.getItem(savedParamsKey);
+    if (!raw) {
+      setParamMessage("本机还没有保存过参数。");
+      return;
+    }
+    try {
+      const payload = JSON.parse(raw) as { global?: Params; roi?: Params };
+      if (payload.global) setParams(normalizeParams({ ...defaultParams, ...payload.global }));
+      if (payload.roi) setRoiParams(normalizeParams({ ...defaultParams, ...payload.roi }));
+      setParamMessage("已加载本机保存的参数。");
+    } catch {
+      setParamMessage("保存的参数格式不可读。");
+    }
   }
 
   function handleImageMouseDown(event: React.MouseEvent<HTMLDivElement>) {
@@ -399,7 +435,7 @@ function App() {
       const response = await apiFetch("/api/roi-detect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: selectedImage, roi: box, ...params })
+        body: JSON.stringify({ image: selectedImage, roi: box, ...roiParams })
       });
       if (!response.ok) {
         throw new Error(await response.text());
@@ -506,16 +542,39 @@ function App() {
           </div>
         </div>
 
+        <div className="param-scope-panel">
+          <div className="segmented">
+            <button
+              className={paramScope === "global" ? "active" : ""}
+              onClick={() => setParamScope("global")}
+            >
+              全图参数
+            </button>
+            <button
+              className={paramScope === "roi" ? "active" : ""}
+              onClick={() => setParamScope("roi")}
+            >
+              ROI 局部参数
+            </button>
+          </div>
+          <div className="param-actions">
+            <button type="button" onClick={copyGlobalToRoi}>复制全图到 ROI</button>
+            <button type="button" onClick={saveParamPreset}>保存参数</button>
+            <button type="button" onClick={loadParamPreset}>加载参数</button>
+          </div>
+          {paramMessage && <p>{paramMessage}</p>}
+        </div>
+
         <div className="segmented">
           <button
-            className={params.mode === "bright" ? "active" : ""}
-            onClick={() => setParams((current) => ({ ...current, mode: "bright" }))}
+            className={activeParams.mode === "bright" ? "active" : ""}
+            onClick={() => setActiveParams((current) => ({ ...current, mode: "bright" }))}
           >
             亮峰
           </button>
           <button
-            className={params.mode === "dark" ? "active" : ""}
-            onClick={() => setParams((current) => ({ ...current, mode: "dark" }))}
+            className={activeParams.mode === "dark" ? "active" : ""}
+            onClick={() => setActiveParams((current) => ({ ...current, mode: "dark" }))}
           >
             暗峰
           </button>
@@ -526,28 +585,29 @@ function App() {
             <SliderField
               key={slider.key}
               spec={slider}
-              value={params[slider.key]}
+              value={activeParams[slider.key]}
               onChange={(value) => updateSlider(slider.key, value)}
             />
           ))}
         </div>
 
         <div className="param-status" aria-live="polite">
-          <span>{params.mode === "bright" ? "亮峰" : "暗峰"}</span>
-          <span>σ {formatValue(params.sigma_min, 1)}-{formatValue(params.sigma_max, 1)}</span>
-          <span>阈值 {formatValue(params.threshold_rel, 2)}</span>
-          <span>间距 {params.min_distance}px</span>
-          <span>邻居 {params.neighbors_k}</span>
-          <span>{params.fill_lattice ? `补点 ${formatValue(params.fill_strength, 2)}` : "不补点"}</span>
+          <span>{paramScope === "global" ? "全图" : "ROI"}</span>
+          <span>{activeParams.mode === "bright" ? "亮峰" : "暗峰"}</span>
+          <span>σ {formatValue(activeParams.sigma_min, 1)}-{formatValue(activeParams.sigma_max, 1)}</span>
+          <span>阈值 {formatValue(activeParams.threshold_rel, 2)}</span>
+          <span>间距 {activeParams.min_distance}px</span>
+          <span>邻居 {activeParams.neighbors_k}</span>
+          <span>{activeParams.fill_lattice ? `补点 ${formatValue(activeParams.fill_strength, 2)}` : "不补点"}</span>
         </div>
 
         <label className="toggle-field">
           <input
             type="checkbox"
-            checked={params.fill_lattice}
-            onChange={(event) => setParams((current) => ({ ...current, fill_lattice: event.target.checked }))}
+            checked={activeParams.fill_lattice}
+            onChange={(event) => setActiveParams((current) => ({ ...current, fill_lattice: event.target.checked }))}
           />
-          <span>晶格补点</span>
+          <span>{paramScope === "global" ? "全图晶格补点" : "ROI 晶格补点"}</span>
         </label>
 
         <div className="roi-status">
@@ -569,9 +629,9 @@ function App() {
         <label className="field">
           <span>精修</span>
           <select
-            value={params.refine_method}
+            value={activeParams.refine_method}
             onChange={(event) =>
-              setParams((current) => ({
+              setActiveParams((current) => ({
                 ...current,
                 refine_method: event.target.value as Params["refine_method"]
               }))
@@ -698,7 +758,7 @@ function App() {
                 <p>
                   {editTool === "point" && "单击空白处添加点，拖动点移动，双击点删除。"}
                   {editTool === "box-delete" && "拖动框选区域，松开鼠标后删除框内所有点。"}
-                  {editTool === "box-redetect" && "拖动框选区域，松开鼠标后用当前参数重新识别并替换框内点。"}
+                  {editTool === "box-redetect" && "拖动框选区域，松开鼠标后用 ROI 局部参数重新识别并替换框内点。"}
                   当前 {editableSites.length} 个点。
                 </p>
                 {editMessage && <p className="edit-message">{editMessage}</p>}
