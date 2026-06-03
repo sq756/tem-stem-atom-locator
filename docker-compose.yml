@@ -1,0 +1,8 @@
+services:
+  atom-locator:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./experimental_data:/app/experimental_data
+    restart: unless-stopped

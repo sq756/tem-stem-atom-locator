@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+web/node_modules/
+web/dist/
+macos/AtomLocatorMac/.build/
+experimental_data/results/
+experimental_data/raw_tif/*
+experimental_data/excluded_sem_tif/*
+!experimental_data/raw_tif/.gitkeep
+!experimental_data/excluded_sem_tif/.gitkeep
+*.pdf

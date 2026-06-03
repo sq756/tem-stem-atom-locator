@@ -1,0 +1,23 @@
+[project]
+name = "atom-locator"
+version = "0.1.0"
+description = "Principle-driven TEM/STEM atom column site detection toolkit."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.124",
+  "uvicorn[standard]>=0.38",
+  "numpy>=2.0",
+  "scipy>=1.14",
+  "tifffile>=2025.10",
+  "scikit-image>=0.25",
+  "pandas>=2.3",
+  "Pillow>=12.0",
+  "matplotlib>=3.10",
+  "python-multipart>=0.0.20"
+]
+
+[project.scripts]
+atom-locator = "atom_locator.cli:main"
+
+[tool.setuptools]
+packages = ["atom_locator"]

@@ -1,0 +1,10 @@
+fastapi>=0.124
+uvicorn[standard]>=0.38
+numpy>=2.0
+scipy>=1.14
+tifffile>=2025.10
+scikit-image>=0.25
+pandas>=2.3
+Pillow>=12.0
+matplotlib>=3.10
+python-multipart>=0.0.20
