@@ -5,6 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+import tifffile
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / ".venv" / "bin" / "python"
@@ -12,8 +15,26 @@ if not PYTHON.exists():
     PYTHON = Path(sys.executable)
 
 
+def make_synthetic_tiff(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    height = 192
+    width = 256
+    yy, xx = np.mgrid[0:height, 0:width]
+    image = np.full((height, width), 0.12, dtype=np.float32)
+    for y in range(30, height - 25, 18):
+        row_shift = 5 if (y // 18) % 2 else 0
+        for x in range(28 + row_shift, width - 25, 18):
+            image += 0.9 * np.exp(-(((xx - x) ** 2 + (yy - y) ** 2) / (2 * 2.2**2)))
+    image += 0.04 * np.random.default_rng(42).normal(size=image.shape)
+    image = np.clip(image, 0, 1)
+    tifffile.imwrite(path, (image * 65535).astype(np.uint16))
+
+
 def run_cli_contract() -> None:
     image = ROOT / "experimental_data" / "raw_tif" / "cyy.tif"
+    if not image.exists():
+        image = ROOT / "experimental_data" / "raw_tif" / "synthetic_smoke.tif"
+        make_synthetic_tiff(image)
     output_root = ROOT / "experimental_data" / "results"
     command = [
         str(PYTHON),

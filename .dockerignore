@@ -1,4 +1,6 @@
 .git
+.DS_Store
+._*
 .venv
 __pycache__
 *.pyc

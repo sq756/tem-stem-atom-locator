@@ -2,18 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ImageDraw
 
 
 def save_preprocessed(image: np.ndarray, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.imsave(output_path, image, cmap="gray")
+    gray = np.clip(image * 255, 0, 255).astype(np.uint8)
+    Image.fromarray(gray, mode="L").save(output_path)
 
 
 def save_overlay(base_image: np.ndarray, sites: list[dict], output_path: Path) -> None:
