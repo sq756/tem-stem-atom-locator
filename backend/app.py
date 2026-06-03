@@ -91,6 +91,10 @@ class AutoTuneRequest(DetectionRequest):
     roi: Roi
 
 
+class RoiDetectRequest(DetectionRequest):
+    roi: Roi
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {
@@ -216,6 +220,32 @@ def autotune(request: AutoTuneRequest) -> dict:
     return summary
 
 
+@app.post("/api/roi-detect")
+def roi_detect(request: RoiDetectRequest) -> dict:
+    if not request.image:
+        raise HTTPException(status_code=400, detail="ROI detect requires one image")
+    image_path = resolve_image(request.image)
+    run_id = datetime.now().strftime("roi_%Y%m%d_%H%M%S")
+    output_dir = RESULTS_DIR / run_id
+    result = run_detection(image_path, output_dir, request.params(), periodic_roi=request.roi.model_dump())
+    roi = normalize_roi(request.roi)
+    sites = [
+        site
+        for site in result["sites"]
+        if roi["x"] <= site["x_px"] <= roi["x"] + roi["width"]
+        and roi["y"] <= site["y_px"] <= roi["y"] + roi["height"]
+    ]
+    for index, site in enumerate(sites, start=1):
+        site["id"] = index
+    return {
+        "run_id": run_id,
+        "image": result["image"]["name"],
+        "roi": roi,
+        "site_count": len(sites),
+        "sites": sites,
+    }
+
+
 @app.get("/api/runs/{run_id}")
 def run_summary(run_id: str) -> dict:
     path = RESULTS_DIR / run_id / "run_summary.json"
@@ -261,6 +291,17 @@ def unique_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise HTTPException(status_code=500, detail="Could not create unique upload filename")
+
+
+def normalize_roi(roi: Roi) -> dict:
+    x = min(roi.x, roi.x + roi.width)
+    y = min(roi.y, roi.y + roi.height)
+    return {
+        "x": max(0, round(x)),
+        "y": max(0, round(y)),
+        "width": max(0, round(abs(roi.width))),
+        "height": max(0, round(abs(roi.height))),
+    }
 
 
 @app.get("/{full_path:path}")

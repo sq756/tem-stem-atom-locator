@@ -471,6 +471,68 @@ h2 {
   font-size: 13px;
 }
 
+.edit-help p {
+  margin: 6px 0 0;
+}
+
+.edit-toolbar,
+.legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-toolbar button {
+  padding: 6px 9px;
+  color: #384540;
+  background: #ffffff;
+  border: 1px solid #cbd8d3;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.edit-toolbar button.active {
+  color: #ffffff;
+  background: #156f5a;
+  border-color: #156f5a;
+}
+
+.legend-row {
+  margin-top: 8px;
+  color: #56625e;
+  font-size: 12px;
+}
+
+.legend-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 35%);
+  border: 2px solid #ff3b30;
+}
+
+.legend-dot.yellow {
+  border-color: #ffb81c;
+}
+
+.edit-message {
+  padding: 7px 9px;
+  color: #294338;
+  background: #eef7f3;
+  border: 1px solid #cce0d8;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
 .tune-panel {
   display: grid;
   gap: 8px;

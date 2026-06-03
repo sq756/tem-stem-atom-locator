@@ -68,6 +68,8 @@ type Site = {
   periodic_filled?: boolean;
 };
 
+type EditTool = "point" | "box-delete" | "box-redetect";
+
 type Params = {
   mode: "bright" | "dark";
   sigma_min: number;
@@ -144,11 +146,13 @@ function App() {
   const [selectedResult, setSelectedResult] = useState<RunResult | null>(null);
   const [editableSites, setEditableSites] = useState<Site[]>([]);
   const [editMode, setEditMode] = useState(false);
+  const [editTool, setEditTool] = useState<EditTool>("point");
   const [dragSiteId, setDragSiteId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [tuning, setTuning] = useState(false);
   const [imagesLoading, setImagesLoading] = useState(true);
   const [error, setError] = useState("");
+  const [editMessage, setEditMessage] = useState("");
   const [roi, setRoi] = useState<Roi | null>(null);
   const [roiBox, setRoiBox] = useState<RoiBox | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -180,6 +184,7 @@ function App() {
     if (!activeResult) {
       setEditableSites([]);
       setEditMode(false);
+      setEditMessage("");
       return;
     }
     apiFetch(activeResult.json)
@@ -187,6 +192,11 @@ function App() {
       .then((payload) => setEditableSites(payload.sites ?? []))
       .catch((err) => setError(String(err)));
   }, [activeResult]);
+
+  useEffect(() => {
+    setEditTool("point");
+    setEditMessage("");
+  }, [editMode]);
 
   async function uploadImage(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -287,14 +297,16 @@ function App() {
     if (editMode && activeResult) {
       const point = imagePoint(event);
       if (!point) return;
-      addManualSite(point.imageX, point.imageY);
+      if (editTool === "point") {
+        addManualSite(point.imageX, point.imageY);
+        return;
+      }
+      beginRoi(point);
       return;
     }
     const point = imagePoint(event);
     if (!point) return;
-    setDragStart({ x: point.imageX, y: point.imageY });
-    setRoi({ x: point.imageX, y: point.imageY, width: 1, height: 1 });
-    setRoiBox({ left: point.viewX, top: point.viewY, width: 1, height: 1 });
+    beginRoi(point);
   }
 
   function handleImageMouseMove(event: React.MouseEvent<HTMLDivElement>) {
@@ -311,6 +323,33 @@ function App() {
     if (!dragStart || !imageRef.current) return;
     const point = imagePoint(event);
     if (!point) return;
+    updateRoi(point);
+  }
+
+  async function handleImageMouseUp() {
+    setDragSiteId(null);
+    setDragStart(null);
+    if (roi && (roi.width < 16 || roi.height < 16)) {
+      setRoi(null);
+      setRoiBox(null);
+      return;
+    }
+    if (editMode && roi && editTool === "box-delete") {
+      deleteSitesInRoi(roi);
+    }
+    if (editMode && roi && editTool === "box-redetect") {
+      await replaceSitesInRoi(roi);
+    }
+  }
+
+  function beginRoi(point: NonNullable<ReturnType<typeof imagePoint>>) {
+    setDragStart({ x: point.imageX, y: point.imageY });
+    setRoi({ x: point.imageX, y: point.imageY, width: 1, height: 1 });
+    setRoiBox({ left: point.viewX, top: point.viewY, width: 1, height: 1 });
+  }
+
+  function updateRoi(point: NonNullable<ReturnType<typeof imagePoint>>) {
+    if (!dragStart) return;
     const x = Math.min(dragStart.x, point.imageX);
     const y = Math.min(dragStart.y, point.imageY);
     const width = Math.abs(point.imageX - dragStart.x);
@@ -320,15 +359,6 @@ function App() {
     const top = Math.min(viewStart.y, point.viewY);
     setRoi({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) });
     setRoiBox({ left, top, width: Math.abs(point.viewX - viewStart.x), height: Math.abs(point.viewY - viewStart.y) });
-  }
-
-  function handleImageMouseUp() {
-    setDragSiteId(null);
-    setDragStart(null);
-    if (roi && (roi.width < 16 || roi.height < 16)) {
-      setRoi(null);
-      setRoiBox(null);
-    }
   }
 
   function addManualSite(x: number, y: number) {
@@ -349,6 +379,46 @@ function App() {
 
   function deleteSite(id: number) {
     setEditableSites((sites) => sites.filter((site) => site.id !== id).map((site, index) => ({ ...site, id: index + 1 })));
+  }
+
+  function deleteSitesInRoi(box: Roi) {
+    setEditableSites((sites) => {
+      const kept = sites.filter((site) => !siteInRoi(site, box));
+      const removed = sites.length - kept.length;
+      setEditMessage(`框选删除 ${removed} 个点，当前 ${kept.length} 个点。`);
+      return renumberSites(kept);
+    });
+  }
+
+  async function replaceSitesInRoi(box: Roi) {
+    if (!activeResult || !selectedImage) return;
+    setLoading(true);
+    setError("");
+    setEditMessage("正在重新识别框选区域...");
+    try {
+      const response = await apiFetch("/api/roi-detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: selectedImage, roi: box, ...params })
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload = await response.json();
+      const newSites = (payload.sites ?? []) as Site[];
+      setEditableSites((sites) => {
+        const outside = sites.filter((site) => !siteInRoi(site, box));
+        const replaced = sites.length - outside.length;
+        const merged = renumberSites([...outside, ...newSites]);
+        setEditMessage(`框选区域替换：删除 ${replaced} 个旧点，加入 ${newSites.length} 个新点，当前 ${merged.length} 个点。`);
+        return merged;
+      });
+    } catch (err) {
+      setError(String(err));
+      setEditMessage("");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function exportEditedCsv() {
@@ -610,7 +680,28 @@ function App() {
             )}
             {editMode && (
               <div className="edit-help">
-                单击空白处添加点，拖动红点移动，双击红点删除。当前 {editableSites.length} 个点。
+                <div className="edit-toolbar">
+                  <button className={editTool === "point" ? "active" : ""} type="button" onClick={() => setEditTool("point")}>
+                    单点
+                  </button>
+                  <button className={editTool === "box-delete" ? "active" : ""} type="button" onClick={() => setEditTool("box-delete")}>
+                    框删
+                  </button>
+                  <button className={editTool === "box-redetect" ? "active" : ""} type="button" onClick={() => setEditTool("box-redetect")}>
+                    框选重识别
+                  </button>
+                </div>
+                <div className="legend-row">
+                  <span><i className="legend-dot red" />红点：原始检测</span>
+                  <span><i className="legend-dot yellow" />黄点：晶格/周期补点</span>
+                </div>
+                <p>
+                  {editTool === "point" && "单击空白处添加点，拖动点移动，双击点删除。"}
+                  {editTool === "box-delete" && "拖动框选区域，松开鼠标后删除框内所有点。"}
+                  {editTool === "box-redetect" && "拖动框选区域，松开鼠标后用当前参数重新识别并替换框内点。"}
+                  当前 {editableSites.length} 个点。
+                </p>
+                {editMessage && <p className="edit-message">{editMessage}</p>}
               </div>
             )}
             {run.autotune && (
@@ -670,6 +761,19 @@ function normalizeParams(next: Params): Params {
     neighbors_k: Math.round(next.neighbors_k),
     fill_iterations: Math.round(next.fill_iterations)
   };
+}
+
+function siteInRoi(site: Site, roi: Roi) {
+  return (
+    site.x_px >= roi.x &&
+    site.x_px <= roi.x + roi.width &&
+    site.y_px >= roi.y &&
+    site.y_px <= roi.y + roi.height
+  );
+}
+
+function renumberSites(sites: Site[]) {
+  return sites.map((site, index) => ({ ...site, id: index + 1 }));
 }
 
 function round(value: number, decimals: number) {
